@@ -1,0 +1,15 @@
+# Binaries and build output
+bin/
+*.class
+
+# JavaFX SDK download (auto-downloaded by batch scripts)
+lib/javafx-sdk-21.0.2/
+lib/*.zip
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
