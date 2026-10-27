@@ -16,5 +16,5 @@ if not exist bin\server\ServerMainApp.class (
     call compile.bat
 )
 
-echo -> Dang khoi chay giao dien Server JavaFX...
+echo [*] Dang khoi chay giao dien Server JavaFX...
 start "VKU Mail Server" javaw --module-path "lib\javafx-sdk-21.0.2\lib" --add-modules javafx.controls,javafx.fxml -cp "bin;lib\mongo\*" server.ServerMainApp

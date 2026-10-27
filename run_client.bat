@@ -16,5 +16,5 @@ if not exist bin\client\ClientMainApp.class (
     call compile.bat
 )
 
-echo -> Dang khoi chay giao dien Client JavaFX...
+echo [*] Dang khoi chay giao dien Client JavaFX...
 start "VKU Email Client" javaw --module-path "lib\javafx-sdk-21.0.2\lib" --add-modules javafx.controls,javafx.fxml -cp "bin;lib\mongo\*" client.ClientMainApp
