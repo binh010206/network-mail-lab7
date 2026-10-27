@@ -75,7 +75,54 @@ public class UserManager {
         }
 
         // Nếu cục bộ chưa có, thử kiểm tra trên MongoDB Atlas
-        return MongoManager.getInstance().checkUserAuth(cleanEmail, password);
+        boolean mongoOk = MongoManager.getInstance().checkUserAuth(cleanEmail, password);
+        if (mongoOk) {
+            try {
+                if (!userDir.exists()) userDir.mkdirs();
+                File sentDir = new File(userDir, "sent");
+                File inboxDir = new File(userDir, "inbox");
+                if (!sentDir.exists()) sentDir.mkdirs();
+                if (!inboxDir.exists()) inboxDir.mkdirs();
+                if (!infoFile.exists()) {
+                    String timeStr = LocalDateTime.now().format(TIME_FMT);
+                    String content = "Tài khoản: " + cleanEmail + "\r\n"
+                                   + "Mật khẩu: " + password + "\r\n"
+                                   + "Ngày tạo: " + timeStr + "\r\n";
+                    Files.write(infoFile.toPath(), content.getBytes(StandardCharsets.UTF_8));
+                }
+            } catch (Exception ignored) {}
+            return true;
+        }
+        return false;
+    }
+
+    public static synchronized void syncAllUsersFromMongo() {
+        try {
+            java.util.List<org.bson.Document> mongoUsers = MongoManager.getInstance().getAllUsers();
+            for (org.bson.Document doc : mongoUsers) {
+                String email = doc.getString("email");
+                String pass = doc.getString("password");
+                String createdAt = doc.getString("created_at");
+                if (email == null || email.trim().isEmpty()) continue;
+
+                String cleanEmail = email.trim().toLowerCase();
+                File userDir = new File(USERS_DIR, cleanEmail);
+                File sentDir = new File(userDir, "sent");
+                File inboxDir = new File(userDir, "inbox");
+                File infoFile = new File(userDir, "account_info.txt");
+
+                if (!userDir.exists()) userDir.mkdirs();
+                if (!sentDir.exists()) sentDir.mkdirs();
+                if (!inboxDir.exists()) inboxDir.mkdirs();
+
+                if (!infoFile.exists()) {
+                    String content = "Tài khoản: " + cleanEmail + "\r\n"
+                                   + "Mật khẩu: " + (pass != null ? pass : "123456") + "\r\n"
+                                   + "Ngày tạo: " + (createdAt != null ? createdAt : LocalDateTime.now().format(TIME_FMT)) + "\r\n";
+                    Files.write(infoFile.toPath(), content.getBytes(StandardCharsets.UTF_8));
+                }
+            }
+        } catch (Exception ignored) {}
     }
 
     public static synchronized void saveSentMailLocal(String senderEmail, EmailMessage email) {
