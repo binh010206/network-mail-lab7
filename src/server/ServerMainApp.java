@@ -384,8 +384,9 @@ public class ServerMainApp extends Application {
 
         new Thread(() -> {
             try {
-                smtpServerSocket = new ServerSocket(smtpPort);
-                pop3ServerSocket = new ServerSocket(pop3Port);
+                // Lắng nghe trên tất cả các card mạng (0.0.0.0) bao gồm cả Wi-Fi LAN và Ethernet
+                smtpServerSocket = new ServerSocket(smtpPort, 50, InetAddress.getByName("0.0.0.0"));
+                pop3ServerSocket = new ServerSocket(pop3Port, 50, InetAddress.getByName("0.0.0.0"));
 
                 isRunning = true;
                 Platform.runLater(() -> {
@@ -500,17 +501,41 @@ public class ServerMainApp extends Application {
     }
 
     private String getLocalLanIp() {
+        String wifiIp = null;
+        String ethIp = null;
+        String fallbackIp = null;
+
         try {
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
             for (NetworkInterface iface : Collections.list(interfaces)) {
                 if (iface.isLoopback() || !iface.isUp()) continue;
+
+                String name = (iface.getName() + " " + iface.getDisplayName()).toLowerCase();
+                // Bỏ qua các card mạng ảo của VMware, VirtualBox, WSL, Bluetooth
+                if (name.contains("virtual") || name.contains("vmnet") || name.contains("vbox") ||
+                    name.contains("wsl") || name.contains("hyper-v") || name.contains("pseudo") ||
+                    name.contains("bluetooth") || name.contains("teredo") || name.contains("host-only")) {
+                    continue;
+                }
+
                 for (InetAddress addr : Collections.list(iface.getInetAddresses())) {
                     if (addr instanceof Inet4Address && !addr.isLoopbackAddress()) {
-                        return addr.getHostAddress();
+                        String ip = addr.getHostAddress();
+                        if (name.contains("wi-fi") || name.contains("wlan") || name.contains("wireless")) {
+                            wifiIp = ip;
+                        } else if (name.contains("ethernet") || name.contains("eth") || name.contains("lan")) {
+                            ethIp = ip;
+                        } else if (fallbackIp == null) {
+                            fallbackIp = ip;
+                        }
                     }
                 }
             }
         } catch (Exception ignored) {}
+
+        if (wifiIp != null) return wifiIp;
+        if (ethIp != null) return ethIp;
+        if (fallbackIp != null) return fallbackIp;
         return "127.0.0.1";
     }
 

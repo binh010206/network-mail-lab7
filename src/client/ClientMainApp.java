@@ -477,70 +477,101 @@ public class ClientMainApp extends Application {
         }
 
         final int port = targetPort;
-        log("[Quét LAN]: Đang quét dải IP trong mạng LAN để tìm Mail Server (cổng " + port + ")...");
+        log("[Quét LAN]: Đang bắt đầu dò tìm Mail Server (cổng " + port + ") trên các dải mạng LAN...");
 
         new Thread(() -> {
             List<String> foundIps = new ArrayList<>();
-            try {
-                String localIp = getLocalIPv4();
-                String subnet = localIp.substring(0, localIp.lastIndexOf('.') + 1);
 
-                ExecutorService pool = Executors.newFixedThreadPool(40);
-                List<Future<String>> futures = new ArrayList<>();
+            // 1. Kiểm tra ưu tiên IP đang nhập trong ô trước
+            String currentTypedIp = txtServerHost.getText().trim();
+            if (!currentTypedIp.isEmpty() && !currentTypedIp.equals("127.0.0.1") && !currentTypedIp.equals("localhost")) {
+                try (Socket s = new Socket()) {
+                    s.connect(new InetSocketAddress(currentTypedIp, port), 800);
+                    foundIps.add(currentTypedIp);
+                } catch (Exception ignored) {}
+            }
 
-                for (int i = 1; i <= 254; i++) {
-                    final String testIp = subnet + i;
-                    futures.add(pool.submit(() -> {
-                        try (Socket s = new Socket()) {
-                            s.connect(new InetSocketAddress(testIp, port), 400);
-                            return testIp;
-                        } catch (Exception ignored) {
-                            return null;
-                        }
-                    }));
+            // 2. Quét toàn bộ các dải mạng vật lý thực tế (Wi-Fi, LAN)
+            if (foundIps.isEmpty()) {
+                Set<String> subnets = getLocalPhysicalSubnets();
+                for (String subnet : subnets) {
+                    log("[Quét LAN]: Đang quét dải: " + subnet + "1 -> " + subnet + "254");
+                    ExecutorService pool = Executors.newFixedThreadPool(60);
+                    List<Future<String>> futures = new ArrayList<>();
+
+                    for (int i = 1; i <= 254; i++) {
+                        final String testIp = subnet + i;
+                        futures.add(pool.submit(() -> {
+                            try (Socket s = new Socket()) {
+                                s.connect(new InetSocketAddress(testIp, port), 500);
+                                return testIp;
+                            } catch (Exception ignored) {
+                                return null;
+                            }
+                        }));
+                    }
+
+                    for (Future<String> f : futures) {
+                        try {
+                            String res = f.get();
+                            if (res != null && !foundIps.contains(res)) {
+                                foundIps.add(res);
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                    pool.shutdown();
+                    if (!foundIps.isEmpty()) break; // Tìm thấy server thì dừng quét
                 }
-
-                for (Future<String> f : futures) {
-                    try {
-                        String res = f.get();
-                        if (res != null) foundIps.add(res);
-                    } catch (Exception ignored) {}
-                }
-                pool.shutdown();
-
-            } catch (Exception e) {
-                log("[Quét LAN Lỗi]: " + e.getMessage());
             }
 
             Platform.runLater(() -> {
                 if (!foundIps.isEmpty()) {
                     String found = foundIps.get(0);
                     txtServerHost.setText(found);
-                    log("[Quét LAN]: Đã tìm thấy Mail Server tại địa chỉ IP: " + found);
-                    showAlert(Alert.AlertType.INFORMATION, "Quét LAN Hoàn Tất",
+                    log("[Quét LAN]: Tìm thấy Mail Server tại địa chỉ IP: " + found);
+                    showAlert(Alert.AlertType.INFORMATION, "Quét LAN Thành Công",
                             "Đã tìm thấy Mail Server tại IP: " + found + "\nĐã tự động điền vào ô kết nối!");
                 } else {
-                    log("[Quét LAN]: Không tìm thấy server nào trong dải mạng LAN hiện tại.");
-                    showAlert(Alert.AlertType.WARNING, "Kết quả quét",
-                            "Không tìm thấy máy chủ nào đang mở cổng " + port + " trong mạng LAN.");
+                    log("[Quét LAN]: Không tìm thấy server nào đang mở cổng " + port + ".");
+                    showAlert(Alert.AlertType.WARNING, "Không Tìm Thấy Server",
+                            "Không tìm thấy máy chủ nào đang mở cổng " + port + " trong mạng LAN.\n\n"
+                            + "Nguyên nhân phổ biến:\n"
+                            + "1. Máy Server chưa nhấp 'Khởi Động Server'.\n"
+                            + "2. Tường lửa (Windows Firewall) trên máy Server đang chặn kết nối mạng ngoài.\n"
+                            + "   -> Hãy chạy file 'mo_port_firewall.bat' trên máy Server để mở port!");
                 }
             });
         }).start();
     }
 
-    private String getLocalIPv4() {
+    private Set<String> getLocalPhysicalSubnets() {
+        Set<String> subnets = new LinkedHashSet<>();
         try {
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
             for (NetworkInterface iface : Collections.list(interfaces)) {
                 if (iface.isLoopback() || !iface.isUp()) continue;
+
+                String name = (iface.getName() + " " + iface.getDisplayName()).toLowerCase();
+                // Bỏ qua card mạng ảo VMware, VirtualBox, WSL, Bluetooth
+                if (name.contains("virtual") || name.contains("vmnet") || name.contains("vbox") ||
+                    name.contains("wsl") || name.contains("hyper-v") || name.contains("pseudo") ||
+                    name.contains("bluetooth") || name.contains("teredo") || name.contains("host-only")) {
+                    continue;
+                }
+
                 for (InetAddress addr : Collections.list(iface.getInetAddresses())) {
                     if (addr instanceof Inet4Address && !addr.isLoopbackAddress()) {
-                        return addr.getHostAddress();
+                        String ip = addr.getHostAddress();
+                        int lastDot = ip.lastIndexOf('.');
+                        if (lastDot > 0) {
+                            subnets.add(ip.substring(0, lastDot + 1));
+                        }
                     }
                 }
             }
         } catch (Exception ignored) {}
-        return "127.0.0.1";
+        if (subnets.isEmpty()) subnets.add("192.168.1.");
+        return subnets;
     }
 
     private void log(String msg) {
