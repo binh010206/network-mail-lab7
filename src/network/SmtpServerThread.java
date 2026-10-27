@@ -104,14 +104,14 @@ public class SmtpServerThread implements Runnable {
                         String gmailUser = AppConfig.getGmailSender();
                         String gmailPass = AppConfig.getGmailPassword();
 
-                        if (rcpt.toLowerCase().contains("@gmail.com") || rcpt.toLowerCase().contains("@vku.udn.vn")) {
-                            log("[Relay Gateway]: Đang chuyển tiếp thư thật ra Internet tới Gmail: " + rcpt + "...");
+                        if (rcpt != null && rcpt.contains("@")) {
+                            log("[Relay Gateway]: Đang chuyển tiếp thư thật ra Internet tới: " + rcpt + "...");
                             new Thread(() -> {
                                 boolean ok = SmtpRelaySender.sendRealMail(gmailUser, gmailPass, email, this::log);
                                 if (ok) {
-                                    log("[Relay Gateway]: Chuyển tiếp thành công tới " + rcpt + "! Người nhận mở web Gmail sẽ thấy thư ngay.");
+                                    log("[Relay Gateway]: Chuyển tiếp thành công tới " + rcpt + "! Người nhận mở ứng dụng Gmail sẽ thấy thư ngay.");
                                 } else {
-                                    log("[Relay Gateway]: Chuyển tiếp ra Gmail chưa thành công (vui lòng kiểm tra App Password ở tab Cấu hình).");
+                                    log("[Relay Gateway]: Chuyển tiếp ra Gmail chưa thành công.");
                                 }
                             }).start();
                         }

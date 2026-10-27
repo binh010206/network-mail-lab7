@@ -13,7 +13,7 @@ if not exist "lib\javafx-sdk-21.0.2" (
 
 if not exist bin mkdir bin
 
-javac -encoding UTF-8 -cp "lib\javafx-sdk-21.0.2\lib\*";"lib\mongo\*" -d bin src\model\*.java src\config\*.java src\database\*.java src\network\*.java src\server\*.java src\client\*.java
+javac -encoding UTF-8 -cp "lib\javafx-sdk-21.0.2\lib\*;lib\mongo\*" -d bin src\model\*.java src\config\*.java src\database\*.java src\network\*.java src\server\*.java src\client\*.java
 
 if %ERRORLEVEL% equ 0 (
     echo.

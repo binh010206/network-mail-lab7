@@ -13,7 +13,6 @@ import javafx.scene.layout.*;
 import javafx.stage.Stage;
 import model.EmailMessage;
 import network.Pop3ServerThread;
-import network.SmtpRelaySender;
 import network.SmtpServerThread;
 import org.bson.Document;
 
@@ -50,64 +49,6 @@ public class ServerMainApp extends Application {
 
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
 
-    public static class PasswordEyeBox extends HBox {
-        private final PasswordField passwordField = new PasswordField();
-        private final TextField textField = new TextField();
-        private final Button btnEye = new Button("👁");
-        private boolean isVisible = false;
-
-        public PasswordEyeBox(String defaultPass) {
-            super(5);
-            setAlignment(Pos.CENTER_LEFT);
-            passwordField.setText(defaultPass);
-            textField.setText(defaultPass);
-            textField.setManaged(false);
-            textField.setVisible(false);
-
-            HBox.setHgrow(passwordField, Priority.ALWAYS);
-            HBox.setHgrow(textField, Priority.ALWAYS);
-
-            btnEye.getStyleClass().add("btn-secondary");
-            btnEye.setStyle("-fx-padding: 7px 11px; -fx-font-size: 13px;");
-
-            btnEye.setOnAction(e -> {
-                isVisible = !isVisible;
-                if (isVisible) {
-                    textField.setText(passwordField.getText());
-                    passwordField.setManaged(false);
-                    passwordField.setVisible(false);
-                    textField.setManaged(true);
-                    textField.setVisible(true);
-                    btnEye.setText("🙈");
-                } else {
-                    passwordField.setText(textField.getText());
-                    textField.setManaged(false);
-                    textField.setVisible(false);
-                    passwordField.setManaged(true);
-                    passwordField.setVisible(true);
-                    btnEye.setText("👁");
-                }
-            });
-
-            getChildren().addAll(passwordField, textField, btnEye);
-        }
-
-        public String getPassword() {
-            return isVisible ? textField.getText() : passwordField.getText();
-        }
-
-        public void setPassword(String pass) {
-            passwordField.setText(pass);
-            textField.setText(pass);
-        }
-
-        public void setFieldWidth(double w) {
-            super.setPrefWidth(w);
-            passwordField.setPrefWidth(w);
-            textField.setPrefWidth(w);
-        }
-    }
-
     @Override
     public void start(Stage primaryStage) {
         primaryStage.setTitle("VKU Mail Server");
@@ -121,7 +62,6 @@ public class ServerMainApp extends Application {
         tabPane.getTabs().add(createMonitorTab());
         tabPane.getTabs().add(createMongoViewerTab());
         tabPane.getTabs().add(createUsersTab());
-        tabPane.getTabs().add(createSettingsTab());
         root.setCenter(tabPane);
 
         Scene scene = new Scene(root, 1050, 720);
@@ -152,7 +92,7 @@ public class ServerMainApp extends Application {
         lblStatusServer = new Label("SERVER: ĐÃ DỪNG");
         lblStatusServer.getStyleClass().add("badge-offline");
 
-        lblStatusMongo = new Label("MONGODB: ĐANG KIỂM TRA");
+        lblStatusMongo = new Label("DỮ LIỆU: ĐANG KIỂM TRA");
         lblStatusMongo.getStyleClass().add("badge-offline");
 
         btnToggleServer = new Button("▶ Khởi Động Server");
@@ -186,8 +126,8 @@ public class ServerMainApp extends Application {
         HBox statsBox = new HBox(12);
         statsBox.getChildren().addAll(
                 createStatCard("Thư Đã Nhận", lblStatReceived = new Label("0"), "#3b82f6"),
-                createStatCard("Đã Lưu Lên MongoDB", lblStatMongo = new Label("0"), "#10b981"),
-                createStatCard("Đã Chuyển Tiếp Gmail", lblStatRelay = new Label("0"), "#8b5cf6")
+                createStatCard("Đã Lưu Cơ Sở Dữ Liệu", lblStatMongo = new Label("0"), "#10b981"),
+                createStatCard("Đã Chuyển Tiếp Thư Thật", lblStatRelay = new Label("0"), "#8b5cf6")
         );
 
         VBox terminalBox = new VBox(8);
@@ -200,7 +140,7 @@ public class ServerMainApp extends Application {
         termTitle.getStyleClass().add("section-title");
         HBox.setHgrow(termTitle, Priority.ALWAYS);
 
-        Button btnClearLog = new Button("Xóa Log");
+        Button btnClearLog = new Button("Xóa Nhật Ký");
         btnClearLog.getStyleClass().add("btn-secondary");
         btnClearLog.setOnAction(e -> txtLog.clear());
 
@@ -233,7 +173,7 @@ public class ServerMainApp extends Application {
     }
 
     private Tab createMongoViewerTab() {
-        Tab tab = new Tab("☁️ MongoDB Atlas");
+        Tab tab = new Tab("✉️ Dữ Liệu Thư");
         tab.setClosable(false);
 
         VBox content = new VBox(12);
@@ -242,7 +182,7 @@ public class ServerMainApp extends Application {
         HBox bar = new HBox(12);
         bar.setAlignment(Pos.CENTER_LEFT);
 
-        Button btnReload = new Button("Tải Dữ Liệu Từ Atlas");
+        Button btnReload = new Button("Làm Mới Dữ Liệu");
         btnReload.getStyleClass().add("btn-primary");
         btnReload.setOnAction(e -> reloadMongoData());
 
@@ -253,7 +193,7 @@ public class ServerMainApp extends Application {
 
         VBox leftBox = new VBox(8);
         leftBox.setPadding(new Insets(10));
-        Label lblList = new Label("Danh Sách Document: " + AppConfig.getMongoCollection());
+        Label lblList = new Label("Danh Sách Thư Trong Hệ Thống");
         lblList.getStyleClass().add("section-title");
 
         listMongoMails = new ListView<>();
@@ -267,7 +207,7 @@ public class ServerMainApp extends Application {
 
         VBox rightBox = new VBox(8);
         rightBox.setPadding(new Insets(10));
-        Label lblDetail = new Label("Chi Tiết Bản Ghi Mail");
+        Label lblDetail = new Label("Chi Tiết Thư");
         lblDetail.getStyleClass().add("section-title");
 
         txtMailDetail = new TextArea();
@@ -285,17 +225,13 @@ public class ServerMainApp extends Application {
     }
 
     private void showMailDetail(EmailMessage m) {
-        String detail = String.format("=== THÔNG TIN BẢN GHI MONGODB ATLAS ===\n\n"
-                + "ID Document      : %s\n"
-                + "Thời gian gửi    : %s\n"
-                + "Người gửi        : %s\n"
-                + "Người nhận       : %s\n"
-                + "Tiêu đề          : %s\n"
-                + "Giao thức        : %s\n"
-                + "Trạng thái       : %s\n\n"
-                + "--- NỘI DUNG THƯ ---\n%s",
-                m.getId(), m.getSentAt(), m.getSender(), m.getRecipient(),
-                m.getSubject(), m.getProtocol(), m.getStatus(), m.getBody());
+        String detail = String.format("Thời gian: %s\n"
+                + "Người gửi: %s\n"
+                + "Người nhận: %s\n"
+                + "Tiêu đề: %s\n\n"
+                + "Nội dung:\n%s",
+                m.getSentAt(), m.getSender(), m.getRecipient(),
+                m.getSubject(), m.getBody());
         txtMailDetail.setText(detail);
     }
 
@@ -325,143 +261,46 @@ public class ServerMainApp extends Application {
 
     private void reloadUsersList() {
         listUsers.getItems().clear();
-        // 1. Quét từ thư mục cục bộ users/
-        File usersDir = UserManager.USERS_DIR;
-        if (usersDir.exists()) {
-            File[] dirs = usersDir.listFiles(File::isDirectory);
-            if (dirs != null) {
-                for (File d : dirs) {
-                    listUsers.getItems().add("[Local Directory]: users/" + d.getName());
-                }
-            }
-        }
-        // 2. Quét từ MongoDB Atlas
         new Thread(() -> {
             List<Document> mongoUsers = MongoManager.getInstance().getAllUsers();
             Platform.runLater(() -> {
                 for (Document doc : mongoUsers) {
-                    String item = "[MongoDB Cloud]: " + doc.getString("email") + " (Tạo lúc: " + doc.getString("created_at") + ")";
-                    if (!listUsers.getItems().contains(item)) {
-                        listUsers.getItems().add(item);
+                    String email = doc.getString("email");
+                    String pass = doc.getString("password");
+                    String createdAt = doc.getString("created_at");
+                    Integer sent = doc.getInteger("total_sent", 0);
+                    Integer recv = doc.getInteger("total_received", 0);
+
+                    String item = String.format("Tài khoản: %s  |  Mật khẩu: %s  |  Ngày tạo: %s  |  Đã gửi: %d  |  Đã nhận: %d",
+                            email, pass, createdAt, sent, recv);
+                    listUsers.getItems().add(item);
+                }
+
+                File usersDir = UserManager.USERS_DIR;
+                if (usersDir.exists()) {
+                    File[] dirs = usersDir.listFiles(File::isDirectory);
+                    if (dirs != null) {
+                        for (File d : dirs) {
+                            String email = d.getName();
+                            boolean exists = false;
+                            for (String it : listUsers.getItems()) {
+                                if (it.contains("Tài khoản: " + email)) {
+                                    exists = true;
+                                    break;
+                                }
+                            }
+                            if (!exists) {
+                                listUsers.getItems().add(String.format("Tài khoản: %s (Lưu cục bộ)", email));
+                            }
+                        }
                     }
                 }
+
                 if (listUsers.getItems().isEmpty()) {
-                    listUsers.getItems().add("Chưa có tài khoản nào được tạo.");
+                    listUsers.getItems().add("Chưa có tài khoản nào được tạo trên hệ thống.");
                 }
             });
         }).start();
-    }
-
-    private Tab createSettingsTab() {
-        Tab tab = new Tab("⚙️ Cấu Hình");
-        tab.setClosable(false);
-
-        ScrollPane scroll = new ScrollPane();
-        scroll.setFitToWidth(true);
-
-        VBox content = new VBox(16);
-        content.setPadding(new Insets(16));
-
-        VBox cardGmail = new VBox(10);
-        cardGmail.getStyleClass().add("card");
-
-        Label lblGTitle = new Label("CẤU HÌNH GỬI THƯ GMAIL");
-        lblGTitle.getStyleClass().add("section-title");
-
-        GridPane gridG = new GridPane();
-        gridG.setHgap(10);
-        gridG.setVgap(10);
-
-        gridG.add(new Label("Tài khoản Gmail gửi:"), 0, 0);
-        TextField txtGmailUser = new TextField(AppConfig.getGmailSender());
-        txtGmailUser.setPrefWidth(350);
-        gridG.add(txtGmailUser, 1, 0);
-
-        gridG.add(new Label("Mật khẩu Gmail App Password:"), 0, 1);
-        PasswordEyeBox passGmail = new PasswordEyeBox(AppConfig.getGmailPassword());
-        passGmail.setFieldWidth(350);
-        gridG.add(passGmail, 1, 1);
-
-        Button btnTestGmail = new Button("Gửi Thư Thử Nghiệm");
-        btnTestGmail.getStyleClass().add("btn-secondary");
-        btnTestGmail.setOnAction(e -> {
-            String u = txtGmailUser.getText().trim();
-            String p = passGmail.getPassword().trim();
-            log("[Test Gmail]: Đang gửi thư thử nghiệm từ " + u);
-            new Thread(() -> {
-                EmailMessage testMail = new EmailMessage(u, u, "Kiểm thử SMTP Relay", "Xin chào! Thư này được gửi thành công từ ứng dụng Java Socket tới Gmail.");
-                boolean ok = SmtpRelaySender.sendRealMail(u, p, testMail, this::log);
-                Platform.runLater(() -> {
-                    if (ok) {
-                        showAlert(Alert.AlertType.INFORMATION, "Thành Công", "Thư thử nghiệm đã gửi thành công!");
-                    } else {
-                        showAlert(Alert.AlertType.ERROR, "Thất Bại", "Chưa thể gửi qua Gmail. Hãy kiểm tra lại App Password hoặc mạng.");
-                    }
-                });
-            }).start();
-        });
-
-        cardGmail.getChildren().addAll(lblGTitle, gridG, btnTestGmail);
-
-        VBox cardMongo = new VBox(10);
-        cardMongo.getStyleClass().add("card");
-
-        Label lblMTitle = new Label("CẤU HÌNH MONGODB ATLAS");
-        lblMTitle.getStyleClass().add("section-title");
-
-        GridPane gridM = new GridPane();
-        gridM.setHgap(10);
-        gridM.setVgap(10);
-
-        gridM.add(new Label("MongoDB URI:"), 0, 0);
-        TextField txtMongoUri = new TextField(AppConfig.getMongoUri());
-        txtMongoUri.setPrefWidth(550);
-        gridM.add(txtMongoUri, 1, 0);
-
-        gridM.add(new Label("Tên Database:"), 0, 1);
-        TextField txtMongoDb = new TextField(AppConfig.getMongoDbName());
-        gridM.add(txtMongoDb, 1, 1);
-
-        gridM.add(new Label("Tên Collection:"), 0, 2);
-        TextField txtMongoColl = new TextField(AppConfig.getMongoCollection());
-        gridM.add(txtMongoColl, 1, 2);
-
-        Button btnTestMongo = new Button("Kiểm Tra Kết Nối MongoDB");
-        btnTestMongo.getStyleClass().add("btn-secondary");
-        btnTestMongo.setOnAction(e -> {
-            String uri = txtMongoUri.getText().trim();
-            String db = txtMongoDb.getText().trim();
-            String col = txtMongoColl.getText().trim();
-            new Thread(() -> {
-                boolean ok = MongoManager.getInstance().connect(uri, db, col, this::log);
-                Platform.runLater(() -> {
-                    updateMongoBadge(ok);
-                    if (ok) {
-                        showAlert(Alert.AlertType.INFORMATION, "MongoDB Atlas", "Kết nối thành công CSDL: " + db);
-                    } else {
-                        showAlert(Alert.AlertType.ERROR, "MongoDB Atlas", "Không thể kết nối: " + MongoManager.getInstance().getLastStatusMessage());
-                    }
-                });
-            }).start();
-        });
-
-        cardMongo.getChildren().addAll(lblMTitle, gridM, btnTestMongo);
-
-        Button btnSaveAll = new Button("Lưu Cài Đặt");
-        btnSaveAll.getStyleClass().add("btn-primary");
-        btnSaveAll.setOnAction(e -> {
-            AppConfig.set("gmail.sender", txtGmailUser.getText().trim());
-            AppConfig.set("gmail.app_password", passGmail.getPassword().trim());
-            AppConfig.set("mongodb.uri", txtMongoUri.getText().trim());
-            AppConfig.set("mongodb.database", txtMongoDb.getText().trim());
-            AppConfig.set("mongodb.collection", txtMongoColl.getText().trim());
-            showAlert(Alert.AlertType.INFORMATION, "Cấu hình", "Đã lưu cài đặt thành công.");
-        });
-
-        content.getChildren().addAll(cardGmail, cardMongo, btnSaveAll);
-        scroll.setContent(content);
-        tab.setContent(scroll);
-        return tab;
     }
 
     private void toggleServer() {
@@ -475,6 +314,7 @@ public class ServerMainApp extends Application {
     private void startServer() {
         int smtpPort = AppConfig.getSmtpPort();
         int pop3Port = AppConfig.getPop3Port();
+        String lanIp = getLocalLanIp();
 
         new Thread(() -> {
             try {
@@ -492,7 +332,11 @@ public class ServerMainApp extends Application {
                     btnToggleServer.getStyleClass().add("btn-danger");
                 });
 
+                // Cập nhật thông tin server lên MongoDB Atlas
+                MongoManager.getInstance().updateServerInfo(lanIp, smtpPort, pop3Port, statReceived);
+
                 log("=== MÁY CHỦ KHỞI ĐỘNG THÀNH CÔNG ===");
+                log("IP Máy chủ: " + lanIp);
                 log("Lắng nghe SMTP cổng: " + smtpPort);
                 log("Lắng nghe POP3 cổng: " + pop3Port);
 
@@ -558,11 +402,11 @@ public class ServerMainApp extends Application {
 
     private void updateMongoBadge(boolean ok) {
         if (ok) {
-            lblStatusMongo.setText("MONGODB: ĐÃ KẾT NỐI");
+            lblStatusMongo.setText("DỮ LIỆU: ĐÃ KẾT NỐI");
             lblStatusMongo.getStyleClass().clear();
             lblStatusMongo.getStyleClass().add("badge-online");
         } else {
-            lblStatusMongo.setText("MONGODB: CHƯA KẾT NỐI");
+            lblStatusMongo.setText("DỮ LIỆU: CHƯA KẾT NỐI");
             lblStatusMongo.getStyleClass().clear();
             lblStatusMongo.getStyleClass().add("badge-offline");
         }
@@ -575,7 +419,7 @@ public class ServerMainApp extends Application {
                 listMongoMails.getItems().clear();
                 listMongoMails.getItems().addAll(list);
                 if (list.isEmpty()) {
-                    txtMailDetail.setText("Chưa có email nào trong database");
+                    txtMailDetail.setText("Chưa có email nào trong cơ sở dữ liệu");
                 }
             });
         }).start();
@@ -626,14 +470,6 @@ public class ServerMainApp extends Application {
         if (ethIp != null) return ethIp;
         if (fallbackIp != null) return fallbackIp;
         return "127.0.0.1";
-    }
-
-    private void showAlert(Alert.AlertType type, String title, String msg) {
-        Alert alert = new Alert(type);
-        alert.setTitle(title);
-        alert.setHeaderText(null);
-        alert.setContentText(msg);
-        alert.showAndWait();
     }
 
     public static void main(String[] args) {

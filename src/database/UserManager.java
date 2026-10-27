@@ -82,13 +82,15 @@ public class UserManager {
         try {
             String cleanEmail = senderEmail.trim().toLowerCase();
             File userDir = new File(USERS_DIR, cleanEmail);
+            if (!userDir.exists()) return; // Chỉ lưu nếu tài khoản này đã được tạo trên hệ thống
+
             File sentDir = new File(userDir, "sent");
             if (!sentDir.exists()) sentDir.mkdirs();
 
             String filename = "mail_" + System.currentTimeMillis() + ".txt";
             File mailFile = new File(sentDir, filename);
 
-            String content = "Thời gian gửi: " + email.getSentAt() + "\r\n"
+            String content = "Thời gian: " + email.getSentAt() + "\r\n"
                            + "Người gửi: " + email.getSender() + "\r\n"
                            + "Người nhận: " + email.getRecipient() + "\r\n"
                            + "Tiêu đề: " + email.getSubject() + "\r\n"
@@ -102,13 +104,15 @@ public class UserManager {
         try {
             String cleanEmail = recipientEmail.trim().toLowerCase();
             File userDir = new File(USERS_DIR, cleanEmail);
+            if (!userDir.exists()) return; // Chỉ lưu nếu tài khoản này đã được tạo trên hệ thống
+
             File inboxDir = new File(userDir, "inbox");
             if (!inboxDir.exists()) inboxDir.mkdirs();
 
             String filename = "mail_" + System.currentTimeMillis() + ".txt";
             File mailFile = new File(inboxDir, filename);
 
-            String content = "Thời gian nhận: " + email.getSentAt() + "\r\n"
+            String content = "Thời gian: " + email.getSentAt() + "\r\n"
                            + "Người gửi: " + email.getSender() + "\r\n"
                            + "Người nhận: " + email.getRecipient() + "\r\n"
                            + "Tiêu đề: " + email.getSubject() + "\r\n"

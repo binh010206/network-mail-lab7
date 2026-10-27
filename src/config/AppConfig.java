@@ -55,6 +55,10 @@ public class AppConfig {
         return get("server.ip", "127.0.0.1");
     }
 
+    public static String getServerHost() {
+        return getServerIp();
+    }
+
     public static int getSmtpPort() {
         try {
             return Integer.parseInt(get("server.smtp.port", "2525"));

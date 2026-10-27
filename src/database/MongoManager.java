@@ -4,11 +4,15 @@ import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.*;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.ReplaceOptions;
 import com.mongodb.client.model.Sorts;
+import com.mongodb.client.model.Updates;
 import config.AppConfig;
 import model.EmailMessage;
 import org.bson.Document;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -22,11 +26,13 @@ public class MongoManager {
     private MongoDatabase database;
     private MongoCollection<Document> collection;
     private MongoCollection<Document> usersCollection;
+    private MongoCollection<Document> serverInfoCollection;
+
     private boolean connected = false;
     private String lastStatusMessage = "Chưa kết nối";
 
-    // Danh sách lưu trữ dự phòng trong bộ nhớ (đảm bảo app luôn chạy mượt kể cả khi chưa có mạng)
     private final List<EmailMessage> memoryFallbackList = new CopyOnWriteArrayList<>();
+    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss");
 
     private MongoManager() {
         initFromConfig();
@@ -76,12 +82,12 @@ public class MongoManager {
             database = mongoClient.getDatabase(dbName);
             collection = database.getCollection(collName);
             usersCollection = database.getCollection("users");
+            serverInfoCollection = database.getCollection("server_info");
 
-            // Kiểm tra kết nối nhanh bằng lệnh ping
             database.runCommand(new Document("ping", 1));
 
             connected = true;
-            lastStatusMessage = "Kết nối thành công CSDL: " + dbName + " / " + collName;
+            lastStatusMessage = "Kết nối thành công CSDL: " + dbName;
             if (logCallback != null) logCallback.accept("[MongoDB]: " + lastStatusMessage);
             return true;
         } catch (Exception e) {
@@ -100,14 +106,90 @@ public class MongoManager {
         return lastStatusMessage;
     }
 
+    public void updateServerInfo(String ip, int smtpPort, int pop3Port, int totalSent) {
+        if (!connected || serverInfoCollection == null) return;
+        try {
+            Document doc = new Document("_id", "server_config")
+                    .append("server_ip", ip)
+                    .append("smtp_port", smtpPort)
+                    .append("pop3_port", pop3Port)
+                    .append("total_sent", totalSent)
+                    .append("last_active", LocalDateTime.now().format(TIME_FMT));
+
+            serverInfoCollection.replaceOne(Filters.eq("_id", "server_config"), doc, new ReplaceOptions().upsert(true));
+        } catch (Exception ignored) {}
+    }
+
+    public void incrementServerSent() {
+        if (!connected || serverInfoCollection == null) return;
+        try {
+            serverInfoCollection.updateOne(Filters.eq("_id", "server_config"), Updates.inc("total_sent", 1));
+        } catch (Exception ignored) {}
+    }
+
+    public boolean saveUser(String email, String password, Consumer<String> logCallback) {
+        if (!connected || usersCollection == null) return false;
+        try {
+            String cleanEmail = email.toLowerCase().trim();
+            Document doc = new Document("_id", cleanEmail)
+                    .append("email", cleanEmail)
+                    .append("password", password)
+                    .append("created_at", LocalDateTime.now().format(TIME_FMT))
+                    .append("total_sent", 0)
+                    .append("total_received", 0);
+
+            usersCollection.replaceOne(Filters.eq("_id", cleanEmail), doc, new ReplaceOptions().upsert(true));
+            if (logCallback != null) logCallback.accept("[MongoDB]: Đã lưu tài khoản " + cleanEmail);
+            return true;
+        } catch (Exception e) {
+            if (logCallback != null) logCallback.accept("[MongoDB Lỗi]: Không thể lưu user: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public void incrementUserSent(String email) {
+        if (!connected || usersCollection == null) return;
+        try {
+            usersCollection.updateOne(Filters.eq("_id", email.toLowerCase().trim()), Updates.inc("total_sent", 1));
+        } catch (Exception ignored) {}
+    }
+
+    public void incrementUserReceived(String email) {
+        if (!connected || usersCollection == null) return;
+        try {
+            usersCollection.updateOne(Filters.eq("_id", email.toLowerCase().trim()), Updates.inc("total_received", 1));
+        } catch (Exception ignored) {}
+    }
+
+    public boolean checkUserAuth(String email, String password) {
+        if (!connected || usersCollection == null) return false;
+        try {
+            Document doc = usersCollection.find(Filters.and(
+                    Filters.eq("_id", email.toLowerCase().trim()),
+                    Filters.eq("password", password)
+            )).first();
+            return doc != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public List<Document> getAllUsers() {
+        List<Document> list = new ArrayList<>();
+        if (connected && usersCollection != null) {
+            try {
+                for (Document doc : usersCollection.find().sort(Sorts.descending("created_at"))) {
+                    list.add(doc);
+                }
+            } catch (Exception ignored) {}
+        }
+        return list;
+    }
+
     public boolean saveEmail(EmailMessage msg, Consumer<String> logCallback) {
-        // Luôn lưu vào danh sách bộ nhớ trước để an toàn
         memoryFallbackList.add(0, msg);
 
         if (!connected || collection == null) {
-            if (logCallback != null) {
-                logCallback.accept("[MongoDB Cache]: Lưu tạm vào bộ nhớ (Chưa kết nối Atlas).");
-            }
             return false;
         }
 
@@ -117,18 +199,21 @@ public class MongoManager {
                     .append("recipient", msg.getRecipient())
                     .append("subject", msg.getSubject())
                     .append("body", msg.getBody())
-                    .append("sent_at", msg.getSentAt())
-                    .append("status", msg.getStatus())
-                    .append("protocol", msg.getProtocol());
+                    .append("time", msg.getSentAt());
 
             collection.insertOne(doc);
+
+            incrementUserSent(msg.getSender());
+            incrementUserReceived(msg.getRecipient());
+            incrementServerSent();
+
             if (logCallback != null) {
-                logCallback.accept("[MongoDB Atlas]: Đã lưu thành công Document ID [" + msg.getId() + "] lên Cloud!");
+                logCallback.accept("[MongoDB]: Đã lưu thư vào database");
             }
             return true;
         } catch (Exception e) {
             if (logCallback != null) {
-                logCallback.accept("[MongoDB Lỗi]: Không thể ghi lên Atlas: " + e.getMessage());
+                logCallback.accept("[MongoDB Lỗi]: " + e.getMessage());
             }
             return false;
         }
@@ -148,9 +233,9 @@ public class MongoManager {
                     docs = collection.find(Filters.or(
                             Filters.eq("recipient", recipientEmail.trim()),
                             Filters.regex("recipient", "(?i)" + recipientEmail.trim())
-                    )).sort(Sorts.descending("sent_at"));
+                    )).sort(Sorts.descending("time"));
                 } else {
-                    docs = collection.find().sort(Sorts.descending("sent_at")).limit(50);
+                    docs = collection.find().sort(Sorts.descending("time")).limit(50);
                 }
 
                 for (Document doc : docs) {
@@ -160,9 +245,9 @@ public class MongoManager {
                     msg.setRecipient(doc.getString("recipient"));
                     msg.setSubject(doc.getString("subject"));
                     msg.setBody(doc.getString("body"));
-                    msg.setSentAt(doc.getString("sent_at"));
-                    msg.setStatus(doc.getString("status"));
-                    msg.setProtocol(doc.getString("protocol"));
+                    String t = doc.getString("time");
+                    if (t == null) t = doc.getString("sent_at");
+                    msg.setSentAt(t);
                     list.add(msg);
                 }
                 return list;
@@ -171,7 +256,6 @@ public class MongoManager {
             }
         }
 
-        // Nếu chưa kết nối hoặc lỗi, lấy từ bộ nhớ
         for (EmailMessage m : memoryFallbackList) {
             if (recipientEmail == null || recipientEmail.trim().isEmpty() ||
                     m.getRecipient().equalsIgnoreCase(recipientEmail.trim())) {
@@ -192,46 +276,5 @@ public class MongoManager {
             }
         }
         return true;
-    }
-
-    public boolean saveUser(String email, String password, Consumer<String> logCallback) {
-        if (!connected || usersCollection == null) return false;
-        try {
-            Document doc = new Document("_id", email.toLowerCase().trim())
-                    .append("email", email.toLowerCase().trim())
-                    .append("password", password)
-                    .append("created_at", java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss")));
-            usersCollection.replaceOne(Filters.eq("_id", email.toLowerCase().trim()), doc, new com.mongodb.client.model.ReplaceOptions().upsert(true));
-            if (logCallback != null) logCallback.accept("[MongoDB Atlas]: Đã lưu tài khoản [" + email + "] vào collection 'users'!");
-            return true;
-        } catch (Exception e) {
-            if (logCallback != null) logCallback.accept("[MongoDB Lỗi]: Không thể lưu user: " + e.getMessage());
-            return false;
-        }
-    }
-
-    public boolean checkUserAuth(String email, String password) {
-        if (!connected || usersCollection == null) return false;
-        try {
-            Document doc = usersCollection.find(Filters.and(
-                    Filters.eq("_id", email.toLowerCase().trim()),
-                    Filters.eq("password", password)
-            )).first();
-            return doc != null;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    public List<Document> getAllUsers() {
-        List<Document> list = new ArrayList<>();
-        if (connected && usersCollection != null) {
-            try {
-                for (Document doc : usersCollection.find()) {
-                    list.add(doc);
-                }
-            } catch (Exception ignored) {}
-        }
-        return list;
     }
 }
