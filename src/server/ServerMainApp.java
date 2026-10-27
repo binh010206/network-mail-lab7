@@ -262,6 +262,7 @@ public class ServerMainApp extends Application {
     private void reloadUsersList() {
         listUsers.getItems().clear();
         new Thread(() -> {
+            UserManager.syncAllUsersFromMongo();
             List<Document> mongoUsers = MongoManager.getInstance().getAllUsers();
             Platform.runLater(() -> {
                 for (Document doc : mongoUsers) {
@@ -332,8 +333,9 @@ public class ServerMainApp extends Application {
                     btnToggleServer.getStyleClass().add("btn-danger");
                 });
 
-                // Cập nhật thông tin server lên MongoDB Atlas
+                // Cập nhật thông tin server lên MongoDB Atlas và đồng bộ người dùng
                 MongoManager.getInstance().updateServerInfo(lanIp, smtpPort, pop3Port, statReceived);
+                UserManager.syncAllUsersFromMongo();
 
                 log("=== MÁY CHỦ KHỞI ĐỘNG THÀNH CÔNG ===");
                 log("IP Máy chủ: " + lanIp);

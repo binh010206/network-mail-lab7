@@ -129,7 +129,15 @@ public class UserManager {
         try {
             String cleanEmail = senderEmail.trim().toLowerCase();
             File userDir = new File(USERS_DIR, cleanEmail);
-            if (!userDir.exists()) return; // Chỉ lưu nếu tài khoản này đã được tạo trên hệ thống
+            if (!userDir.exists()) userDir.mkdirs();
+
+            File infoFile = new File(userDir, "account_info.txt");
+            if (!infoFile.exists()) {
+                String content = "Tài khoản: " + cleanEmail + "\r\n"
+                               + "Mật khẩu: 123456\r\n"
+                               + "Ngày tạo: " + email.getSentAt() + "\r\n";
+                Files.write(infoFile.toPath(), content.getBytes(StandardCharsets.UTF_8));
+            }
 
             File sentDir = new File(userDir, "sent");
             if (!sentDir.exists()) sentDir.mkdirs();
@@ -151,7 +159,15 @@ public class UserManager {
         try {
             String cleanEmail = recipientEmail.trim().toLowerCase();
             File userDir = new File(USERS_DIR, cleanEmail);
-            if (!userDir.exists()) return; // Chỉ lưu nếu tài khoản này đã được tạo trên hệ thống
+            if (!userDir.exists()) userDir.mkdirs();
+
+            File infoFile = new File(userDir, "account_info.txt");
+            if (!infoFile.exists()) {
+                String content = "Tài khoản: " + cleanEmail + "\r\n"
+                               + "Mật khẩu: 123456\r\n"
+                               + "Ngày tạo: " + email.getSentAt() + "\r\n";
+                Files.write(infoFile.toPath(), content.getBytes(StandardCharsets.UTF_8));
+            }
 
             File inboxDir = new File(userDir, "inbox");
             if (!inboxDir.exists()) inboxDir.mkdirs();

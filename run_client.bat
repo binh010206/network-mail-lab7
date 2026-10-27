@@ -1,8 +1,9 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
+title VKU Email Client Console
 echo ========================================================
-echo   KHOI DONG UNG DUNG CLIENT (SMTP / POP3 EMAIL CLIENT)
+echo   UNG DUNG CLIENT (SMTP SOAN THU - POP3 HOP THU DEN)
 echo ========================================================
 
 if not exist "lib\javafx-sdk-21.0.2" (
@@ -11,10 +12,19 @@ if not exist "lib\javafx-sdk-21.0.2" (
     echo [OK] Da cai dat xong JavaFX SDK!
 )
 
-if not exist bin\client\ClientMainApp.class (
-    echo [!] Dang bien dich ma nguon lan dau...
-    call compile.bat
+if not exist bin mkdir bin
+if not exist bin\resources mkdir bin\resources
+copy /Y src\resources\style.css bin\resources\style.css >nul
+
+echo [*] Dang tu dong bien dich ma nguon moi nhat...
+javac -encoding UTF-8 -cp "lib\javafx-sdk-21.0.2\lib\*;lib\mongo\*" -d bin src\model\*.java src\config\*.java src\database\*.java src\network\*.java src\server\*.java src\client\*.java
+
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo [!] CO LOI BIEN DICH XAY RA! Vui long kiem tra code Java.
+    pause
+    exit /b %ERRORLEVEL%
 )
 
-echo [*] Dang khoi chay giao dien Client JavaFX...
-start "VKU Email Client" javaw --module-path "lib\javafx-sdk-21.0.2\lib" --add-modules javafx.controls,javafx.fxml -cp "bin;lib\mongo\*" client.ClientMainApp
+echo [OK] Bien dich thanh cong! Dang khoi chay Client...
+java --module-path "lib\javafx-sdk-21.0.2\lib" --add-modules javafx.controls,javafx.fxml -cp "bin;lib\mongo\*" client.ClientMainApp
