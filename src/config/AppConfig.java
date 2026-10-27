@@ -25,10 +25,10 @@ public class AppConfig {
             props.setProperty("server.ip", "127.0.0.1");
             props.setProperty("server.smtp.port", "2525");
             props.setProperty("server.pop3.port", "1110");
-            props.setProperty("gmail.sender", "binhtq.24it@vku.udn.vn");
-            props.setProperty("gmail.app_password", "binh010206");
-            props.setProperty("mongodb.uri", "mongodb+srv://binhtq:binh010206@globalcashflow.mongodb.net/?retryWrites=true&w=majority");
-            props.setProperty("mongodb.database", "globalcashflow");
+            props.setProperty("gmail.sender", "binhcs2006@gmail.com");
+            props.setProperty("gmail.app_password", "icty lcrh mybv mwir");
+            props.setProperty("mongodb.uri", "mongodb+srv://globalcashflowmonitor:binh010206@cluster0.xjhpeid.mongodb.net/vku_network_mail?retryWrites=true&w=majority");
+            props.setProperty("mongodb.database", "vku_network_mail");
             props.setProperty("mongodb.collection", "emails");
             save();
         }
@@ -72,19 +72,19 @@ public class AppConfig {
     }
 
     public static String getGmailSender() {
-        return get("gmail.sender", "binhtq.24it@vku.udn.vn");
+        return get("gmail.sender", "binhcs2006@gmail.com");
     }
 
     public static String getGmailPassword() {
-        return get("gmail.app_password", "binh010206");
+        return get("gmail.app_password", "icty lcrh mybv mwir");
     }
 
     public static String getMongoUri() {
-        return get("mongodb.uri", "");
+        return get("mongodb.uri", "mongodb+srv://globalcashflowmonitor:binh010206@cluster0.xjhpeid.mongodb.net/vku_network_mail?retryWrites=true&w=majority");
     }
 
     public static String getMongoDbName() {
-        return get("mongodb.database", "globalcashflow");
+        return get("mongodb.database", "vku_network_mail");
     }
 
     public static String getMongoCollection() {
