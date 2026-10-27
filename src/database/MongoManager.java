@@ -21,6 +21,7 @@ public class MongoManager {
     private MongoClient mongoClient;
     private MongoDatabase database;
     private MongoCollection<Document> collection;
+    private MongoCollection<Document> usersCollection;
     private boolean connected = false;
     private String lastStatusMessage = "Chưa kết nối";
 
@@ -74,6 +75,7 @@ public class MongoManager {
             mongoClient = MongoClients.create(settings);
             database = mongoClient.getDatabase(dbName);
             collection = database.getCollection(collName);
+            usersCollection = database.getCollection("users");
 
             // Kiểm tra kết nối nhanh bằng lệnh ping
             database.runCommand(new Document("ping", 1));
@@ -190,5 +192,46 @@ public class MongoManager {
             }
         }
         return true;
+    }
+
+    public boolean saveUser(String email, String password, Consumer<String> logCallback) {
+        if (!connected || usersCollection == null) return false;
+        try {
+            Document doc = new Document("_id", email.toLowerCase().trim())
+                    .append("email", email.toLowerCase().trim())
+                    .append("password", password)
+                    .append("created_at", java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss")));
+            usersCollection.replaceOne(Filters.eq("_id", email.toLowerCase().trim()), doc, new com.mongodb.client.model.ReplaceOptions().upsert(true));
+            if (logCallback != null) logCallback.accept("[MongoDB Atlas]: Đã lưu tài khoản [" + email + "] vào collection 'users'!");
+            return true;
+        } catch (Exception e) {
+            if (logCallback != null) logCallback.accept("[MongoDB Lỗi]: Không thể lưu user: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean checkUserAuth(String email, String password) {
+        if (!connected || usersCollection == null) return false;
+        try {
+            Document doc = usersCollection.find(Filters.and(
+                    Filters.eq("_id", email.toLowerCase().trim()),
+                    Filters.eq("password", password)
+            )).first();
+            return doc != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public List<Document> getAllUsers() {
+        List<Document> list = new ArrayList<>();
+        if (connected && usersCollection != null) {
+            try {
+                for (Document doc : usersCollection.find()) {
+                    list.add(doc);
+                }
+            } catch (Exception ignored) {}
+        }
+        return list;
     }
 }

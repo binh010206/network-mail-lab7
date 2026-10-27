@@ -92,11 +92,13 @@ public class SmtpServerThread implements Runnable {
                     String bodyContent = bodyBuilder.toString().trim();
                     log("[SMTP Srv] Đã nhận trọn vẹn thư từ [" + sender + "] gửi tới: " + recipients + " | Tiêu đề: " + subject);
 
-                    // 1. Lưu bản ghi thư vào MongoDB Atlas Cloud
+                    // 1. Lưu bản ghi thư vào MongoDB Atlas Cloud và thư mục users/
                     for (String rcpt : recipients) {
                         EmailMessage email = new EmailMessage(sender, rcpt, subject, bodyContent);
                         email.setProtocol("LAN_SMTP_TO_ATLAS");
                         MongoManager.getInstance().saveEmail(email, this::log);
+                        database.UserManager.saveSentMailLocal(sender, email);
+                        database.UserManager.saveInboxMailLocal(rcpt, email);
 
                         // 2. Relay chuyển tiếp thư thật tới Gmail để người nhận mở web Gmail là có
                         String gmailUser = AppConfig.getGmailSender();

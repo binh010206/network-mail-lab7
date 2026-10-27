@@ -2,6 +2,7 @@ package client;
 
 import config.AppConfig;
 import database.MongoManager;
+import database.UserManager;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -15,8 +16,11 @@ import network.Pop3ClientSocket;
 import network.SmtpClientSocket;
 import network.SmtpRelaySender;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.InputStreamReader;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -27,6 +31,12 @@ public class ClientMainApp extends Application {
     private TextField txtServerHost;
     private TextField txtSmtpPort;
     private TextField txtPop3Port;
+
+    // Quản lý Đăng nhập / Đăng ký
+    private TextField txtAuthEmail;
+    private PasswordEyeBox passAuth;
+    private Label lblCurrentLoggedIn;
+    private String currentUserEmail = "";
 
     // Các trường gửi thư
     private TextField txtFrom;
@@ -40,24 +50,81 @@ public class ClientMainApp extends Application {
 
     // Hộp thư đến POP3
     private TextField txtPopUser;
-    private PasswordField txtPopPass;
+    private PasswordEyeBox passPop;
     private ListView<EmailMessage> listInbox;
     private TextArea txtMailView;
 
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
 
+    public static class PasswordEyeBox extends HBox {
+        private final PasswordField passwordField = new PasswordField();
+        private final TextField textField = new TextField();
+        private final Button btnEye = new Button("👁");
+        private boolean isVisible = false;
+
+        public PasswordEyeBox(String defaultPass) {
+            super(5);
+            setAlignment(Pos.CENTER_LEFT);
+            passwordField.setText(defaultPass);
+            textField.setText(defaultPass);
+            textField.setManaged(false);
+            textField.setVisible(false);
+
+            HBox.setHgrow(passwordField, Priority.ALWAYS);
+            HBox.setHgrow(textField, Priority.ALWAYS);
+
+            btnEye.getStyleClass().add("btn-secondary");
+            btnEye.setStyle("-fx-padding: 7px 11px; -fx-font-size: 13px;");
+
+            btnEye.setOnAction(e -> {
+                isVisible = !isVisible;
+                if (isVisible) {
+                    textField.setText(passwordField.getText());
+                    passwordField.setManaged(false);
+                    passwordField.setVisible(false);
+                    textField.setManaged(true);
+                    textField.setVisible(true);
+                    btnEye.setText("🙈");
+                } else {
+                    passwordField.setText(textField.getText());
+                    textField.setManaged(false);
+                    textField.setVisible(false);
+                    passwordField.setManaged(true);
+                    passwordField.setVisible(true);
+                    btnEye.setText("👁");
+                }
+            });
+
+            getChildren().addAll(passwordField, textField, btnEye);
+        }
+
+        public String getPassword() {
+            return isVisible ? textField.getText() : passwordField.getText();
+        }
+
+        public void setPassword(String pass) {
+            passwordField.setText(pass);
+            textField.setText(pass);
+        }
+
+        public void setFieldWidth(double w) {
+            super.setPrefWidth(w);
+            passwordField.setPrefWidth(w);
+            textField.setPrefWidth(w);
+        }
+    }
+
     @Override
     public void start(Stage primaryStage) {
-        primaryStage.setTitle("VKU Email Client - SMTP / POP3 & MongoDB Atlas (Lab 7)");
+        primaryStage.setTitle("VKU Email Client");
 
         BorderPane root = new BorderPane();
         root.setPadding(new Insets(14));
 
-        // 1. Top Panel: Kết nối Server
         root.setTop(createTopBar());
 
-        // 2. TabPane
         TabPane tabPane = new TabPane();
+        tabPane.getTabs().add(createAuthTab());
         tabPane.getTabs().add(createComposeTab());
         tabPane.getTabs().add(createInboxTab());
         tabPane.getTabs().add(createSettingsTab());
@@ -81,112 +148,195 @@ public class ClientMainApp extends Application {
         HBox topTitleRow = new HBox(15);
         topTitleRow.setAlignment(Pos.CENTER_LEFT);
 
-        Label title = new Label("ỨNG DỤNG THƯ ĐIỆN TỬ (EMAIL CLIENT)");
+        Label title = new Label("EMAIL CLIENT");
         title.getStyleClass().add("header-title");
         HBox.setHgrow(title, Priority.ALWAYS);
 
-        Button btnScanLan = new Button("🔍 Tự Động Quét Server LAN");
+        lblCurrentLoggedIn = new Label("Chưa đăng nhập");
+        lblCurrentLoggedIn.getStyleClass().add("badge-offline");
+
+        Button btnScanLan = new Button("Quét Server LAN");
         btnScanLan.getStyleClass().add("btn-secondary");
         btnScanLan.setOnAction(e -> autoScanLanServer());
 
-        topTitleRow.getChildren().addAll(title, btnScanLan);
+        topTitleRow.getChildren().addAll(title, lblCurrentLoggedIn, btnScanLan);
 
-        // Thanh nhập kết nối Server
         HBox connBar = new HBox(12);
         connBar.setAlignment(Pos.CENTER_LEFT);
         connBar.setStyle("-fx-background-color: #ffffff; -fx-padding: 10px 14px; -fx-background-radius: 8px; -fx-border-color: #cbd5e1; -fx-border-radius: 8px;");
 
-        Label lblHost = new Label("Địa chỉ IP Server:");
+        Label lblHost = new Label("IP Server:");
         lblHost.setStyle("-fx-font-weight: bold;");
         txtServerHost = new TextField(AppConfig.getServerIp());
-        txtServerHost.setPrefWidth(160);
+        txtServerHost.setPrefWidth(180);
 
         Label lblSmtp = new Label("Cổng SMTP:");
         txtSmtpPort = new TextField(String.valueOf(AppConfig.getSmtpPort()));
-        txtSmtpPort.setPrefWidth(70);
+        txtSmtpPort.setPrefWidth(75);
 
         Label lblPop = new Label("Cổng POP3:");
         txtPop3Port = new TextField(String.valueOf(AppConfig.getPop3Port()));
-        txtPop3Port.setPrefWidth(70);
+        txtPop3Port.setPrefWidth(75);
 
-        Label lblHelp = new Label("(Nhập IP máy chủ Server đang chạy trong cùng mạng Wi-Fi/LAN)");
-        lblHelp.getStyleClass().add("sub-title");
-
-        connBar.getChildren().addAll(lblHost, txtServerHost, lblSmtp, txtSmtpPort, lblPop, txtPop3Port, lblHelp);
+        connBar.getChildren().addAll(lblHost, txtServerHost, lblSmtp, txtSmtpPort, lblPop, txtPop3Port);
 
         box.getChildren().addAll(topTitleRow, connBar);
         return box;
     }
 
+    private Tab createAuthTab() {
+        Tab tab = new Tab("👤 Tài Khoản");
+        tab.setClosable(false);
+
+        VBox content = new VBox(14);
+        content.setPadding(new Insets(16));
+        content.getStyleClass().add("card");
+
+        Label formTitle = new Label("ĐĂNG KÝ HOẶC ĐĂNG NHẬP");
+        formTitle.getStyleClass().add("section-title");
+
+        GridPane grid = new GridPane();
+        grid.setHgap(12);
+        grid.setVgap(12);
+
+        grid.add(new Label("Email tài khoản:"), 0, 0);
+        txtAuthEmail = new TextField(AppConfig.getGmailSender());
+        txtAuthEmail.setPrefWidth(350);
+        grid.add(txtAuthEmail, 1, 0);
+
+        grid.add(new Label("Mật khẩu:"), 0, 1);
+        passAuth = new PasswordEyeBox(AppConfig.getGmailPassword());
+        passAuth.setFieldWidth(350);
+        grid.add(passAuth, 1, 1);
+
+        HBox btnRow = new HBox(14);
+        btnRow.setAlignment(Pos.CENTER_LEFT);
+
+        Button btnRegister = new Button("Đăng Ký Tài Khoản Mới");
+        btnRegister.getStyleClass().add("btn-success");
+        btnRegister.setOnAction(e -> executeRegister());
+
+        Button btnLogin = new Button("Đăng Nhập");
+        btnLogin.getStyleClass().add("btn-primary");
+        btnLogin.setOnAction(e -> executeLogin());
+
+        btnRow.getChildren().addAll(btnRegister, btnLogin);
+
+        content.getChildren().addAll(formTitle, grid, btnRow);
+        tab.setContent(content);
+        return tab;
+    }
+
+    private void executeRegister() {
+        String email = txtAuthEmail.getText().trim();
+        String pass = passAuth.getPassword().trim();
+
+        if (email.isEmpty() || pass.isEmpty()) {
+            showAlert(Alert.AlertType.WARNING, "Cảnh báo", "Vui lòng nhập đầy đủ Email và Mật khẩu!");
+            return;
+        }
+
+        boolean ok = UserManager.registerLocal(email, pass, this::log);
+        if (ok) {
+            currentUserEmail = email;
+            txtFrom.setText(email);
+            txtPopUser.setText(email);
+            passPop.setPassword(pass);
+            lblCurrentLoggedIn.setText("User: " + email);
+            lblCurrentLoggedIn.getStyleClass().clear();
+            lblCurrentLoggedIn.getStyleClass().add("badge-online");
+
+            showAlert(Alert.AlertType.INFORMATION, "Thành Công",
+                    "Đăng ký thành công tài khoản: " + email + "\n"
+                    + "- Đã tạo thư mục users/" + email + "\n"
+                    + "- Đã lưu thông tin tài khoản lên MongoDB Atlas.");
+        } else {
+            showAlert(Alert.AlertType.ERROR, "Thất Bại", "Tài khoản " + email + " đã tồn tại hoặc xảy ra lỗi!");
+        }
+    }
+
+    private void executeLogin() {
+        String email = txtAuthEmail.getText().trim();
+        String pass = passAuth.getPassword().trim();
+
+        if (email.isEmpty() || pass.isEmpty()) {
+            showAlert(Alert.AlertType.WARNING, "Cảnh báo", "Vui lòng nhập Email và Mật khẩu!");
+            return;
+        }
+
+        boolean ok = UserManager.loginLocal(email, pass);
+        if (ok) {
+            currentUserEmail = email;
+            txtFrom.setText(email);
+            txtPopUser.setText(email);
+            passPop.setPassword(pass);
+            lblCurrentLoggedIn.setText("User: " + email);
+            lblCurrentLoggedIn.getStyleClass().clear();
+            lblCurrentLoggedIn.getStyleClass().add("badge-online");
+
+            showAlert(Alert.AlertType.INFORMATION, "Thành Công", "Đăng nhập thành công cho tài khoản: " + email);
+        } else {
+            showAlert(Alert.AlertType.ERROR, "Thất Bại", "Email hoặc Mật khẩu không chính xác!");
+        }
+    }
+
     private Tab createComposeTab() {
-        Tab tab = new Tab("✉️ Soạn & Gửi Thư (SMTP)");
+        Tab tab = new Tab("✉️ Soạn & Gửi Thư");
         tab.setClosable(false);
 
         VBox content = new VBox(12);
         content.setPadding(new Insets(14, 0, 0, 0));
 
-        // Form soạn thư bên trên
         VBox formCard = new VBox(10);
         formCard.getStyleClass().add("card");
 
-        Label formTitle = new Label("SOẠN THƯ MỚI (CHUẨN GIAO THỨC SMTP)");
+        Label formTitle = new Label("SOẠN THƯ MỚI");
         formTitle.getStyleClass().add("section-title");
 
         GridPane grid = new GridPane();
         grid.setHgap(10);
         grid.setVgap(8);
 
-        grid.add(new Label("Người gửi (From):"), 0, 0);
+        grid.add(new Label("Người gửi:"), 0, 0);
         txtFrom = new TextField(AppConfig.getGmailSender());
-        txtFrom.setPrefWidth(400);
+        txtFrom.setPrefWidth(420);
         grid.add(txtFrom, 1, 0);
 
-        grid.add(new Label("Người nhận (To):"), 0, 1);
+        grid.add(new Label("Người nhận:"), 0, 1);
         txtTo = new TextField("lenhuanphat1711@gmail.com");
-        txtTo.setPromptText("Nhập địa chỉ Gmail người nhận (VD: recipient@gmail.com)...");
         grid.add(txtTo, 1, 1);
 
-        grid.add(new Label("Tiêu đề (Subject):"), 0, 2);
+        grid.add(new Label("Tiêu đề:"), 0, 2);
         txtSubject = new TextField("Kiểm Thử Bài Tập Lập Trình Mạng Lab 7 - VKU");
         grid.add(txtSubject, 1, 2);
 
-        // Chế độ gửi
-        HBox modeBox = new HBox(15);
+        HBox modeBox = new HBox(20);
         modeBox.setAlignment(Pos.CENTER_LEFT);
         ToggleGroup tg = new ToggleGroup();
 
-        radViaServer = new RadioButton("🟢 Gửi qua LAN Mail Server (Lưu MongoDB Atlas + Relay Vào Gmail Thật)");
+        radViaServer = new RadioButton("Gửi qua Server");
         radViaServer.setToggleGroup(tg);
         radViaServer.setSelected(true);
 
-        radDirectGmail = new RadioButton("🔵 Gửi trực tiếp tới smtp.gmail.com:465 (SSL Socket)");
+        radDirectGmail = new RadioButton("Gửi trực tiếp Gmail");
         radDirectGmail.setToggleGroup(tg);
 
         modeBox.getChildren().addAll(radViaServer, radDirectGmail);
         grid.add(new Label("Chế độ gửi:"), 0, 3);
         grid.add(modeBox, 1, 3);
 
-        grid.add(new Label("Nội dung thư:"), 0, 4);
-        txtBody = new TextArea("Chào bạn!\nThư này được gửi từ ứng dụng Lập Trình Mạng (Socket SMTP) của nhóm.\nNội dung thư đã được đồng bộ lên MongoDB Atlas Cloud và chuyển tiếp trực tiếp vào hộp thư Gmail của bạn.");
+        grid.add(new Label("Nội dung:"), 0, 4);
+        txtBody = new TextArea("Chào bạn!\nThư này được gửi từ ứng dụng Lập Trình Mạng của nhóm.\nNội dung thư đã được đồng bộ lên MongoDB Atlas và gửi trực tiếp vào hộp thư Gmail của bạn.");
         txtBody.setPrefRowCount(4);
         grid.add(txtBody, 1, 4);
 
-        HBox actionRow = new HBox(12);
-        actionRow.setAlignment(Pos.CENTER_LEFT);
-
-        btnSend = new Button("🚀 GỬI THƯ NGAY");
+        btnSend = new Button("GỬI THƯ");
         btnSend.getStyleClass().add("btn-primary");
-        btnSend.setStyle("-fx-font-size: 14px; -fx-padding: 9px 24px;");
+        btnSend.setStyle("-fx-font-size: 14px; -fx-padding: 9px 28px;");
         btnSend.setOnAction(e -> executeSendMail());
 
-        Label lblSendNote = new Label("Thư sẽ được gửi qua Socket mạng, lưu vào MongoDB và xuất hiện ngay trên Gmail web!");
-        lblSendNote.getStyleClass().add("sub-title");
+        formCard.getChildren().addAll(formTitle, grid, btnSend);
 
-        actionRow.getChildren().addAll(btnSend, lblSendNote);
-
-        formCard.getChildren().addAll(formTitle, grid, actionRow);
-
-        // Khung Console Protocol Log bên dưới
         VBox logBox = new VBox(6);
         logBox.getStyleClass().add("card");
         VBox.setVgrow(logBox, Priority.ALWAYS);
@@ -194,7 +344,7 @@ public class ClientMainApp extends Application {
         HBox logHeader = new HBox(10);
         logHeader.setAlignment(Pos.CENTER_LEFT);
 
-        Label lblLogT = new Label("Nhật Ký Giao Tiếp Socket SMTP (Protocol Stream Live)");
+        Label lblLogT = new Label("Nhật Ký Giao Tiếp Socket");
         lblLogT.getStyleClass().add("section-title");
         HBox.setHgrow(lblLogT, Priority.ALWAYS);
 
@@ -223,7 +373,7 @@ public class ClientMainApp extends Application {
         String body = txtBody.getText().trim();
 
         if (to.isEmpty()) {
-            showAlert(Alert.AlertType.WARNING, "Cảnh báo", "Vui lòng nhập địa chỉ người nhận (To)!");
+            showAlert(Alert.AlertType.WARNING, "Cảnh báo", "Vui lòng nhập địa chỉ người nhận!");
             return;
         }
 
@@ -232,12 +382,11 @@ public class ClientMainApp extends Application {
         btnSend.setDisable(true);
         btnSend.setText("Đang Gửi...");
 
-        log("[SMTP Client]: Bắt đầu gửi thư tới: " + to + " | Tiêu đề: " + subject);
+        log("[SMTP Client]: Gửi thư tới " + to + " | Tiêu đề: " + subject);
 
         new Thread(() -> {
             boolean success;
             if (radViaServer.isSelected()) {
-                // Chế độ 1: Gửi qua LAN Server
                 String sHost = txtServerHost.getText().trim();
                 int sPort;
                 try {
@@ -245,69 +394,68 @@ public class ClientMainApp extends Application {
                 } catch (NumberFormatException e) {
                     sPort = 2525;
                 }
-                log("--> [Socket Mode]: Kết nối tới Máy Chủ Server tại " + sHost + ":" + sPort);
+                log("--> Kết nối tới Server tại " + sHost + ":" + sPort);
                 success = SmtpClientSocket.sendMailToServer(sHost, sPort, email, this::log);
             } else {
-                // Chế độ 2: Gửi trực tiếp Gmail SSL 465
-                log("--> [Direct Mode]: Kết nối trực tiếp SSL tới smtp.gmail.com:465");
+                log("--> Kết nối trực tiếp SSL tới smtp.gmail.com:465");
                 String gUser = AppConfig.getGmailSender();
                 String gPass = AppConfig.getGmailPassword();
                 success = SmtpRelaySender.sendRealMail(gUser, gPass, email, this::log);
             }
 
+            if (success) {
+                UserManager.saveSentMailLocal(from, email);
+            }
+
             Platform.runLater(() -> {
                 btnSend.setDisable(false);
-                btnSend.setText("🚀 GỬI THƯ NGAY");
+                btnSend.setText("GỬI THƯ");
                 if (success) {
-                    showAlert(Alert.AlertType.INFORMATION, "Thành Công!",
-                            "Thư đã được gửi thành công!\n- Dữ liệu đã lưu trên MongoDB Atlas Cloud.\n- Thư thật đã gửi vào Gmail của: " + to);
+                    showAlert(Alert.AlertType.INFORMATION, "Thành Công",
+                            "Thư đã gửi thành công!\n- Đã lưu vào thư mục users/" + from + "/sent/\n- Đã đồng bộ lên MongoDB Atlas.\n- Đã chuyển tiếp vào Gmail người nhận: " + to);
                 } else {
                     showAlert(Alert.AlertType.ERROR, "Lỗi Gửi Thư",
-                            "Chưa thể gửi thư. Vui lòng kiểm tra lại kết nối mạng hoặc xem chi tiết lỗi trong khung Terminal Log bên dưới.");
+                            "Chưa thể gửi thư. Vui lòng kiểm tra lại kết nối mạng hoặc xem chi tiết lỗi trong Terminal bên dưới.");
                 }
             });
         }).start();
     }
 
     private Tab createInboxTab() {
-        Tab tab = new Tab("📥 Hộp Thư Đến (POP3 & MongoDB)");
+        Tab tab = new Tab("📥 Hộp Thư Đến");
         tab.setClosable(false);
 
         VBox content = new VBox(12);
         content.setPadding(new Insets(14, 0, 0, 0));
 
-        // Thanh thao tác POP3
-        HBox bar = new HBox(10);
+        HBox bar = new HBox(12);
         bar.setAlignment(Pos.CENTER_LEFT);
         bar.getStyleClass().add("card");
 
         Label lblUser = new Label("Tài khoản:");
         txtPopUser = new TextField(AppConfig.getGmailSender());
-        txtPopUser.setPrefWidth(220);
+        txtPopUser.setPrefWidth(240);
 
         Label lblPass = new Label("Mật khẩu:");
-        txtPopPass = new PasswordField();
-        txtPopPass.setText(AppConfig.getGmailPassword());
-        txtPopPass.setPrefWidth(140);
+        passPop = new PasswordEyeBox(AppConfig.getGmailPassword());
+        passPop.setFieldWidth(180);
 
-        Button btnFetchPop = new Button("📥 Lấy Thư Qua POP3 Socket");
+        Button btnFetchPop = new Button("Lấy Thư Qua POP3");
         btnFetchPop.getStyleClass().add("btn-primary");
         btnFetchPop.setOnAction(e -> fetchMailsViaPop3());
 
-        Button btnSyncMongo = new Button("☁️ Đồng Bộ Trực Tiếp Từ MongoDB Atlas");
+        Button btnSyncMongo = new Button("Đồng Bộ Từ MongoDB");
         btnSyncMongo.getStyleClass().add("btn-secondary");
         btnSyncMongo.setOnAction(e -> syncFromMongoDB());
 
-        bar.getChildren().addAll(lblUser, txtPopUser, lblPass, txtPopPass, btnFetchPop, btnSyncMongo);
+        bar.getChildren().addAll(lblUser, txtPopUser, lblPass, passPop, btnFetchPop, btnSyncMongo);
 
-        // Khu vực xem thư 2 cột
         SplitPane split = new SplitPane();
         VBox.setVgrow(split, Priority.ALWAYS);
 
-        // Cột trái: Danh sách thư
         VBox left = new VBox(8);
         left.setPadding(new Insets(8));
-        Label lblBoxTitle = new Label("Hộp Thư Đến (Inbox)");
+        Label lblBoxTitle = new Label("Hộp Thư Đến");
         lblBoxTitle.getStyleClass().add("section-title");
 
         listInbox = new ListView<>();
@@ -319,7 +467,6 @@ public class ClientMainApp extends Application {
         });
         left.getChildren().addAll(lblBoxTitle, listInbox);
 
-        // Cột phải: Xem chi tiết thư
         VBox right = new VBox(8);
         right.setPadding(new Insets(8));
 
@@ -329,7 +476,7 @@ public class ClientMainApp extends Application {
         lblViewTitle.getStyleClass().add("section-title");
         HBox.setHgrow(lblViewTitle, Priority.ALWAYS);
 
-        Button btnDelete = new Button("🗑 Xóa Thư Này");
+        Button btnDelete = new Button("Xóa Thư");
         btnDelete.getStyleClass().add("btn-danger");
         btnDelete.setOnAction(e -> deleteSelectedMail());
 
@@ -371,18 +518,21 @@ public class ClientMainApp extends Application {
         }
         final int finalPort = port;
         String u = txtPopUser.getText().trim();
-        String p = txtPopPass.getText().trim();
+        String p = passPop.getPassword().trim();
 
-        log("[POP3 Client]: Đang lấy danh sách thư từ máy chủ " + host + ":" + finalPort + "...");
+        log("[POP3 Client]: Lấy danh sách thư từ máy chủ " + host + ":" + finalPort);
 
         new Thread(() -> {
             List<EmailMessage> mails = Pop3ClientSocket.fetchMails(host, finalPort, u, p, this::log);
+            for (EmailMessage m : mails) {
+                UserManager.saveInboxMailLocal(u, m);
+            }
             Platform.runLater(() -> {
                 listInbox.getItems().clear();
                 listInbox.getItems().addAll(mails);
-                log("[POP3 Client]: Tải thành công " + mails.size() + " thư qua giao thức POP3.");
+                log("[POP3 Client]: Đã nạp " + mails.size() + " thư.");
                 if (mails.isEmpty()) {
-                    txtMailView.setText("(Hộp thư trống hoặc chưa có thư nào gửi tới " + u + ")");
+                    txtMailView.setText("Hộp thư trống");
                 }
             });
         }).start();
@@ -390,15 +540,15 @@ public class ClientMainApp extends Application {
 
     private void syncFromMongoDB() {
         String u = txtPopUser.getText().trim();
-        log("[MongoDB Client]: Đang đồng bộ danh sách thư từ cụm Atlas Cloud...");
+        log("[MongoDB Client]: Đồng bộ danh sách thư từ cụm Atlas Cloud...");
         new Thread(() -> {
             List<EmailMessage> mails = MongoManager.getInstance().getEmailsForUser(u);
             Platform.runLater(() -> {
                 listInbox.getItems().clear();
                 listInbox.getItems().addAll(mails);
-                log("[MongoDB Client]: Đã nạp " + mails.size() + " thư từ MongoDB Atlas.");
+                log("[MongoDB Client]: Đã nạp " + mails.size() + " thư từ MongoDB.");
                 if (mails.isEmpty()) {
-                    txtMailView.setText("(Chưa tìm thấy bản ghi nào trên MongoDB Atlas cho tài khoản: " + u + ")");
+                    txtMailView.setText("Chưa có thư nào trong database");
                 }
             });
         }).start();
@@ -416,7 +566,7 @@ public class ClientMainApp extends Application {
             Platform.runLater(() -> {
                 listInbox.getItems().remove(selected);
                 txtMailView.clear();
-                showAlert(Alert.AlertType.INFORMATION, "Đã Xóa", "Đã xóa thư thành công khỏi cơ sở dữ liệu!");
+                showAlert(Alert.AlertType.INFORMATION, "Đã Xóa", "Đã xóa thư thành công.");
             });
         }).start();
     }
@@ -429,7 +579,7 @@ public class ClientMainApp extends Application {
         content.setPadding(new Insets(16));
         content.getStyleClass().add("card");
 
-        Label title = new Label("CÀI ĐẶT THÔNG SỐ HỆ THỐNG");
+        Label title = new Label("CÀI ĐẶT THÔNG SỐ");
         title.getStyleClass().add("section-title");
 
         GridPane grid = new GridPane();
@@ -441,26 +591,26 @@ public class ClientMainApp extends Application {
         txtSetUser.setPrefWidth(350);
         grid.add(txtSetUser, 1, 0);
 
-        grid.add(new Label("Mật khẩu / App Password:"), 0, 1);
-        PasswordField txtSetPass = new PasswordField();
-        txtSetPass.setText(AppConfig.getGmailPassword());
-        grid.add(txtSetPass, 1, 1);
+        grid.add(new Label("Mật khẩu Gmail App Password:"), 0, 1);
+        PasswordEyeBox passSet = new PasswordEyeBox(AppConfig.getGmailPassword());
+        passSet.setFieldWidth(350);
+        grid.add(passSet, 1, 1);
 
         grid.add(new Label("MongoDB Atlas URI:"), 0, 2);
         TextField txtSetMongo = new TextField(AppConfig.getMongoUri());
         txtSetMongo.setPrefWidth(550);
         grid.add(txtSetMongo, 1, 2);
 
-        Button btnSave = new Button("💾 Lưu Cài Đặt Vào config.properties");
+        Button btnSave = new Button("Lưu Cài Đặt");
         btnSave.getStyleClass().add("btn-primary");
         btnSave.setOnAction(e -> {
             AppConfig.set("gmail.sender", txtSetUser.getText().trim());
-            AppConfig.set("gmail.app_password", txtSetPass.getText().trim());
+            AppConfig.set("gmail.app_password", passSet.getPassword().trim());
             AppConfig.set("mongodb.uri", txtSetMongo.getText().trim());
             AppConfig.set("server.ip", txtServerHost.getText().trim());
             AppConfig.set("server.smtp.port", txtSmtpPort.getText().trim());
             AppConfig.set("server.pop3.port", txtPop3Port.getText().trim());
-            showAlert(Alert.AlertType.INFORMATION, "Cấu hình", "Đã lưu cài đặt thành công!");
+            showAlert(Alert.AlertType.INFORMATION, "Cấu hình", "Đã lưu cài đặt thành công.");
         });
 
         content.getChildren().addAll(title, grid, btnSave);
@@ -477,21 +627,20 @@ public class ClientMainApp extends Application {
         }
 
         final int port = targetPort;
-        log("[Quét LAN]: Đang bắt đầu dò tìm Mail Server (cổng " + port + ") trên các dải mạng LAN...");
+        log("[Quét LAN]: Đang dò tìm Mail Server VKU trên mạng...");
 
         new Thread(() -> {
             List<String> foundIps = new ArrayList<>();
 
-            // 1. Kiểm tra ưu tiên IP đang nhập trong ô trước
+            // 1. Kiểm tra IP đang nhập trong ô trước (nếu có và trả về đúng banner VKU-LAN-Mail-Server)
             String currentTypedIp = txtServerHost.getText().trim();
             if (!currentTypedIp.isEmpty() && !currentTypedIp.equals("127.0.0.1") && !currentTypedIp.equals("localhost")) {
-                try (Socket s = new Socket()) {
-                    s.connect(new InetSocketAddress(currentTypedIp, port), 800);
+                if (verifyVkuMailServer(currentTypedIp, port)) {
                     foundIps.add(currentTypedIp);
-                } catch (Exception ignored) {}
+                }
             }
 
-            // 2. Quét toàn bộ các dải mạng vật lý thực tế (Wi-Fi, LAN)
+            // 2. Nếu chưa có, quét các dải mạng vật lý và XÁC THỰC BANNER VKU-LAN-Mail-Server
             if (foundIps.isEmpty()) {
                 Set<String> subnets = getLocalPhysicalSubnets();
                 for (String subnet : subnets) {
@@ -502,12 +651,10 @@ public class ClientMainApp extends Application {
                     for (int i = 1; i <= 254; i++) {
                         final String testIp = subnet + i;
                         futures.add(pool.submit(() -> {
-                            try (Socket s = new Socket()) {
-                                s.connect(new InetSocketAddress(testIp, port), 500);
+                            if (verifyVkuMailServer(testIp, port)) {
                                 return testIp;
-                            } catch (Exception ignored) {
-                                return null;
                             }
+                            return null;
                         }));
                     }
 
@@ -520,7 +667,7 @@ public class ClientMainApp extends Application {
                         } catch (Exception ignored) {}
                     }
                     pool.shutdown();
-                    if (!foundIps.isEmpty()) break; // Tìm thấy server thì dừng quét
+                    if (!foundIps.isEmpty()) break;
                 }
             }
 
@@ -528,20 +675,30 @@ public class ClientMainApp extends Application {
                 if (!foundIps.isEmpty()) {
                     String found = foundIps.get(0);
                     txtServerHost.setText(found);
-                    log("[Quét LAN]: Tìm thấy Mail Server tại địa chỉ IP: " + found);
-                    showAlert(Alert.AlertType.INFORMATION, "Quét LAN Thành Công",
-                            "Đã tìm thấy Mail Server tại IP: " + found + "\nĐã tự động điền vào ô kết nối!");
+                    log("[Quét LAN]: Đã tìm thấy Mail Server tại IP: " + found);
+                    showAlert(Alert.AlertType.INFORMATION, "Quét LAN Hoàn Tất",
+                            "Đã tìm thấy Mail Server tại IP: " + found);
                 } else {
-                    log("[Quét LAN]: Không tìm thấy server nào đang mở cổng " + port + ".");
-                    showAlert(Alert.AlertType.WARNING, "Không Tìm Thấy Server",
-                            "Không tìm thấy máy chủ nào đang mở cổng " + port + " trong mạng LAN.\n\n"
-                            + "Nguyên nhân phổ biến:\n"
-                            + "1. Máy Server chưa nhấp 'Khởi Động Server'.\n"
-                            + "2. Tường lửa (Windows Firewall) trên máy Server đang chặn kết nối mạng ngoài.\n"
-                            + "   -> Hãy chạy file 'mo_port_firewall.bat' trên máy Server để mở port!");
+                    log("[Quét LAN]: Không tìm thấy Mail Server nào đang mở trên mạng.");
+                    showAlert(Alert.AlertType.WARNING, "Không Tìm Thấy",
+                            "Không tìm thấy máy chủ VKU Mail Server nào đang chạy.\n"
+                            + "Hãy đảm bảo máy Server đã bấm 'Khởi Động Server' và đã chạy 'mo_port_firewall.bat'!");
                 }
             });
         }).start();
+    }
+
+    // Kết nối và bắt buộc đọc banner phải chứa 'VKU-LAN-Mail-Server'
+    private boolean verifyVkuMailServer(String ip, int port) {
+        try (Socket s = new Socket()) {
+            s.connect(new InetSocketAddress(ip, port), 600);
+            s.setSoTimeout(1000);
+            BufferedReader reader = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
+            String banner = reader.readLine();
+            return (banner != null && banner.contains("VKU-LAN-Mail-Server"));
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private Set<String> getLocalPhysicalSubnets() {
@@ -552,7 +709,6 @@ public class ClientMainApp extends Application {
                 if (iface.isLoopback() || !iface.isUp()) continue;
 
                 String name = (iface.getName() + " " + iface.getDisplayName()).toLowerCase();
-                // Bỏ qua card mạng ảo VMware, VirtualBox, WSL, Bluetooth
                 if (name.contains("virtual") || name.contains("vmnet") || name.contains("vbox") ||
                     name.contains("wsl") || name.contains("hyper-v") || name.contains("pseudo") ||
                     name.contains("bluetooth") || name.contains("teredo") || name.contains("host-only")) {
