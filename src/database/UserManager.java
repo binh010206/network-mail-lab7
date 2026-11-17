@@ -6,6 +6,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.sql.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.function.Consumer;
@@ -13,6 +14,10 @@ import java.util.function.Consumer;
 public class UserManager {
     public static final File USERS_DIR = new File("users");
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss");
+
+    private static final String PG_URL = "jdbc:postgresql://127.0.0.1:5432/lab8_server1";
+    private static final String PG_USER = "lab8_server1";
+    private static final String PG_PASS = "Lab8_e03980b458a7046436b168e426cee1aa5f2db97cf615811f";
 
     static {
         if (!USERS_DIR.exists()) {
@@ -47,7 +52,8 @@ public class UserManager {
                 logger.accept("[Tài khoản]: Đã tạo thư mục users/" + cleanEmail + " và file account_info.txt thành công.");
             }
 
-            // Đồng bộ tài khoản lên MongoDB Atlas Cloud
+            // Đồng bộ tài khoản lên PostgreSQL và MongoDB Atlas Cloud
+            saveUserToPostgres(cleanEmail, password, timeStr, logger);
             MongoManager.getInstance().saveUser(cleanEmail, password, logger);
             return true;
         } catch (IOException e) {
@@ -73,6 +79,24 @@ public class UserManager {
                 }
             } catch (IOException ignored) {}
         }
+
+        // Nếu cục bộ chưa có, thử kiểm tra trên PostgreSQL
+        try {
+            Class.forName("org.postgresql.Driver");
+            try (Connection conn = DriverManager.getConnection(PG_URL, PG_USER, PG_PASS);
+                 PreparedStatement ps = conn.prepareStatement("SELECT password FROM mail_users WHERE username = ? OR email = ?")) {
+                ps.setString(1, cleanEmail);
+                ps.setString(2, cleanEmail);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        String pass = rs.getString("password");
+                        if (pass != null && pass.equals(password)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
 
         // Nếu cục bộ chưa có, thử kiểm tra trên MongoDB Atlas
         boolean mongoOk = MongoManager.getInstance().checkUserAuth(cleanEmail, password);
@@ -182,6 +206,45 @@ public class UserManager {
                            + "Nội dung:\r\n" + email.getBody() + "\r\n";
 
             Files.write(mailFile.toPath(), content.getBytes(StandardCharsets.UTF_8));
+            saveEmailToPostgres(email.getSender(), email.getRecipient(), email.getSubject(), email.getBody(), email.getSentAt(), null);
         } catch (Exception ignored) {}
+    }
+
+    public static void saveUserToPostgres(String email, String password, String timeStr, Consumer<String> logger) {
+        new Thread(() -> {
+            try {
+                Class.forName("org.postgresql.Driver");
+                try (Connection conn = DriverManager.getConnection(PG_URL, PG_USER, PG_PASS);
+                     PreparedStatement ps = conn.prepareStatement(
+                             "INSERT INTO mail_users (username, password, email, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (username) DO NOTHING")) {
+                    ps.setString(1, email);
+                    ps.setString(2, password);
+                    ps.setString(3, email);
+                    ps.setString(4, timeStr);
+                    ps.executeUpdate();
+                    if (logger != null) logger.accept("[CSDL PostgreSQL]: Đã lưu tài khoản [" + email + "] vào bảng mail_users.");
+                }
+            } catch (Throwable ignored) {}
+        }).start();
+    }
+
+    public static void saveEmailToPostgres(String sender, String receiver, String subject, String body, String timeStr, Consumer<String> logger) {
+        new Thread(() -> {
+            try {
+                Class.forName("org.postgresql.Driver");
+                try (Connection conn = DriverManager.getConnection(PG_URL, PG_USER, PG_PASS);
+                     PreparedStatement ps = conn.prepareStatement(
+                             "INSERT INTO mail_emails (sender, receiver, subject, body, timestamp, status) VALUES (?, ?, ?, ?, ?, ?)")) {
+                    ps.setString(1, sender);
+                    ps.setString(2, receiver);
+                    ps.setString(3, subject);
+                    ps.setString(4, body);
+                    ps.setString(5, timeStr);
+                    ps.setString(6, "DELIVERED");
+                    ps.executeUpdate();
+                    if (logger != null) logger.accept("[CSDL PostgreSQL]: Đã lưu thư từ [" + sender + "] vào bảng mail_emails.");
+                }
+            } catch (Throwable ignored) {}
+        }).start();
     }
 }
